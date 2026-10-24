@@ -1,0 +1,3 @@
+maxapi
+openai
+python-dotenv
