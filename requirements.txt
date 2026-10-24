@@ -1,3 +1,4 @@
 maxapi
 openai
 python-dotenv
+brotlicffi==1.2.0.1

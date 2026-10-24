@@ -4,6 +4,7 @@ from maxapi import Router
 from maxapi.filters.command import Command, CommandStart
 from maxapi.types import BotStarted, MessageCreated
 from openai import AsyncOpenAI
+from maxapi.types import InputMedia
 
 from app.config import AI_API_KEY, AI_BASE_URL, AI_MODEL
 
@@ -31,8 +32,13 @@ async def bot_started(event: BotStarted):
 @router.message_created(CommandStart())
 async def hello(event: MessageCreated):
     await event.message.answer(
-        "Привет! Я бот для MAX 💙\nНапиши /gpt и свой вопрос, чтобы начать."
+        text="Привет! Я бот для MAX 💙\n"
+             "Напиши /gpt и свой вопрос, чтобы начать.",
+        attachments=[
+            InputMedia(path="app/image/israel.png")
+        ],
     )
+
 
 
 @router.message_created(Command("gpt"))
