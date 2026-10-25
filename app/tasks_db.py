@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.db import _connect
 
-TZ = timezone(timedelta(hours=5))  # Учалы, UTC+5
+TZ = timezone(timedelta(hours=5))
 KEEP_DAYS = 7  
 
 
