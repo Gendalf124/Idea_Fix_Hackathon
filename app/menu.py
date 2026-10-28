@@ -3,7 +3,7 @@ Payload — «пароль» кнопки: по нему handlers.py поним�
 
   menu:summary — «Моя сводка»        menu:all  — «Все чаты сразу»
   menu:help    — «Как подключить»    menu:home — «Главное меню»
-  sum:<chat>   — сводка одного чата  scan:<chat> — обновить участников
+  sum:<chat>   — сводка одного чата  scan:<chat> — обновить участников  title:<chat> — задать название вручную
   src:<task>   — 🔎 источник записи
 """
 from maxapi.types import CallbackButton
@@ -31,6 +31,7 @@ def group_menu(chat_id: int):
     """Кнопки в чате класса."""
     return _keyboard([
         [("📋 Сводка класса", f"sum:{chat_id}")],
+        [("✏️ Название чата", f"title:{chat_id}")],
         [("🔄 Обновить участников", f"scan:{chat_id}")],
     ])
 

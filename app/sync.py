@@ -1,11 +1,24 @@
 import logging
 import time
 
-from app.db import last_synced, mark_synced, touch_member
+from app.db import get_title, last_synced, mark_synced, set_auto_title, touch_member
 
 SYNC_EVERY_MS = 6 * 3600 * 1000  # обновляем список участников раз в 6 часов
 RETRY_EVERY_S = 1800             # после неудачи (например, нет прав) повторяем не чаще раза в 30 минут
 _last_try = {}                   # chat_id -> время последней попытки
+
+
+async def refresh_title(bot, chat_id: int):
+    """Узнаёт название чата из MAX и запоминает его (если человек не задал своё).
+
+    Возвращает текущее название или None. Ошибки не роняют бота.
+    """
+    try:
+        chat = await bot.get_chat_by_id(chat_id)
+        set_auto_title(chat_id, getattr(chat, "title", None))
+    except Exception as exc:
+        logging.warning("Чат %s: не удалось узнать название (%s)", chat_id, exc)
+    return get_title(chat_id)
 
 
 async def sync_members(bot, chat_id: int) -> int:
@@ -34,6 +47,7 @@ async def sync_members(bot, chat_id: int) -> int:
         if not marker or not members:
             break
     mark_synced(chat_id)
+    await refresh_title(bot, chat_id)  # заодно обновим название
     return total
 
 

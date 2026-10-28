@@ -30,6 +30,11 @@ def init_db():
         db.execute(
             "CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, title TEXT)"
         )
+        # Колонка manual: 1 — название задали вручную, автоназвание его не трогает.
+        try:
+            db.execute("ALTER TABLE chats ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # колонка уже есть
         # Когда мы в последний раз подтягивали список участников чата.
         db.execute(
             "CREATE TABLE IF NOT EXISTS chat_sync (chat_id INTEGER PRIMARY KEY, synced_ts INTEGER NOT NULL)"
@@ -94,9 +99,27 @@ def is_member(chat_id: int, user_id) -> bool:
 
 
 def set_title(chat_id: int, title: str):
+    """Название, которое ввёл человек. Оно главнее автоматического."""
     with _connect() as db:
         db.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (chat_id,))
-        db.execute("UPDATE chats SET title = ? WHERE chat_id = ?", (title[:60], chat_id))
+        db.execute("UPDATE chats SET title = ?, manual = 1 WHERE chat_id = ?", (title[:60], chat_id))
+
+
+def set_auto_title(chat_id: int, title: str):
+    """Название, которое бот сам узнал из MAX. Не перезаписывает ручное."""
+    if not title:
+        return
+    with _connect() as db:
+        db.execute("INSERT OR IGNORE INTO chats (chat_id) VALUES (?)", (chat_id,))
+        db.execute(
+            "UPDATE chats SET title = ? WHERE chat_id = ? AND manual = 0", (title[:60], chat_id)
+        )
+
+
+def get_title(chat_id: int):
+    with _connect() as db:
+        row = db.execute("SELECT title FROM chats WHERE chat_id = ?", (chat_id,)).fetchone()
+    return row[0] if row else None
 
 
 def chat_label(chat_id: int, title) -> str:

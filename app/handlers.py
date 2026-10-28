@@ -9,7 +9,7 @@ from maxapi.types import BotAdded, BotStarted, MessageCallback, MessageCreated
 from openai import AsyncOpenAI
 
 from app.config import AI_API_KEY, AI_BASE_URL, AI_MODEL
-from app.db import get_message, is_member, save_message, set_title, touch_member, user_chats
+from app.db import get_message, get_title, is_member, save_message, set_title, touch_member, user_chats
 from app.extractor import extract_tasks, looks_useful
 from app.menu import (back_menu, bottom_buttons_dm, bottom_buttons_group, chat_picker,
                       group_menu, main_menu)
@@ -151,7 +151,11 @@ async def bot_added(event: BotAdded):
     chat_id = event.chat_id
     try:
         count = await sync_members(event.bot, chat_id)
-        text = f"Привет! Я Сферум.Сводка 💙\nНашёл участников: {count}."
+        title = get_title(chat_id)
+        text = (
+            f"Привет! Я Сферум.Сводка 💙\nНашёл участников: {count}."
+            + (f"\nНазвание чата: «{title}». Если нужно другое — кнопка ✏️." if title else "")
+        )
     except Exception:
         logging.exception("Не удалось получить участников")
         text = (
@@ -224,6 +228,10 @@ async def do_scan(bot, message, chat_id: int):
         await message.answer("Не получилось 😕 Сделайте меня администратором чата и нажмите кнопку ещё раз.")
 
 
+pending_title = {}  # (chat_id, user_id) -> когда нажали ✏️. Ждём от этого человека название.
+TITLE_WAIT_S = 300  # ждём 5 минут
+
+
 def callback_user(event):
     """(id, имя) того, кто нажал кнопку."""
     user = event.callback.user
@@ -260,6 +268,17 @@ async def summary_button(event: MessageCallback):
     if in_group:
         await ensure_synced(event.bot, chat_id)
     await send_summary(event.message, chat_id, in_group=in_group)
+
+
+@router.message_callback(F.callback.payload.startswith("title:"))
+async def title_button(event: MessageCallback):
+    """Кнопка ✏️: следующее сообщение этого человека станет названием чата."""
+    chat_id = int(event.callback.payload.split(":")[1])
+    user_id, name = callback_user(event)
+    touch_member(chat_id, user_id, name)
+    pending_title[(chat_id, user_id)] = time.time()
+    await event.answer(notification="Жду название")
+    await event.message.answer("Напиши название следующим сообщением, например: 7Б")
 
 
 @router.message_callback(F.callback.payload.startswith("scan:"))
@@ -302,6 +321,14 @@ async def collect(event: MessageCreated):
 
     user_id, name = sender_info(message)
     chat_id = message.recipient.chat_id
+
+    # Человек нажал ✏️ и теперь пишет название чата.
+    asked_at = pending_title.pop((chat_id, user_id), None)
+    if asked_at and time.time() - asked_at < TITLE_WAIT_S:
+        set_title(chat_id, text)
+        await message.answer(f"Готово, чат называется «{text[:60]}» ✅")
+        return
+
     ts = message.timestamp or int(time.time() * 1000)
     mid = message.body.mid or f"{chat_id}:{ts}"
 
