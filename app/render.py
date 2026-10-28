@@ -41,7 +41,7 @@ def render_tasks(tasks):
     return text, ordered
 
 
-def build_source_keyboard(ordered):
+def build_source_keyboard(ordered, extra=None):
     """Кнопки «🔎 1», «🔎 2»… — номер совпадает с номером строки в сводке."""
     builder = InlineKeyboardBuilder()
     buttons = [
@@ -50,6 +50,8 @@ def build_source_keyboard(ordered):
     ]
     for i in range(0, len(buttons), 4):  # по 4 кнопки в ряд
         builder.row(*buttons[i : i + 4])
+    if extra:  # нижний ряд: «Обновить», «Меню»
+        builder.row(*extra)
     return builder.as_markup()
 
 

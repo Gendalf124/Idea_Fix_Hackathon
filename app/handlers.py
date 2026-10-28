@@ -5,13 +5,14 @@ from datetime import datetime
 
 from maxapi import F, Router
 from maxapi.filters.command import Command, CommandStart
-from maxapi.types import BotAdded, BotStarted, CallbackButton, MessageCallback, MessageCreated
-from maxapi.utils.inline_keyboard import InlineKeyboardBuilder
+from maxapi.types import BotAdded, BotStarted, MessageCallback, MessageCreated
 from openai import AsyncOpenAI
 
 from app.config import AI_API_KEY, AI_BASE_URL, AI_MODEL
 from app.db import get_message, is_member, save_message, set_title, touch_member, user_chats
 from app.extractor import extract_tasks, looks_useful
+from app.menu import (back_menu, bottom_buttons_dm, bottom_buttons_group, chat_picker,
+                      group_menu, main_menu)
 from app.render import build_source_keyboard, build_source_text, render_tasks
 from app.sync import ensure_synced, sync_members
 from app.tasks_db import TZ, add_task, delete_expired, get_task, get_tasks
@@ -80,29 +81,68 @@ async def process_message(chat_id: int, mid: str, text: str, ts: int):
 
 # ============ 4. Показ сводки ============
 
-async def send_summary(message, chat_id: int):
+async def send_summary(message, chat_id: int, in_group: bool, title: str = ""):
     """Показывает актуальные записи ОДНОГО чата. Другие чаты сюда не попадают."""
     delete_expired()  # сначала убираем устаревшее
     tasks = get_tasks(chat_id)
+    head = f"━━ {title} ━━\n" if title else ""
+    bottom = bottom_buttons_group(chat_id) if in_group else bottom_buttons_dm()
     if not tasks:
         await message.answer(
-            "Пока записей нет.\nПроверь, что я администратор чата, и напиши в нём, например: "
-            "«Алгебра: №215 до среды»."
+            head + "Пока записей нет.\nКак только в чате появится задание, я его запишу.",
+            attachments=[build_source_keyboard([], extra=bottom)],
         )
         return
     text, ordered = render_tasks(tasks)
-    keyboard = build_source_keyboard(ordered)  # кнопки 🔎 1, 🔎 2, ...
-    await message.answer(text, attachments=[keyboard])
+    await message.answer(head + text, attachments=[build_source_keyboard(ordered, extra=bottom)])
 
 
-# ============ 5. Команды ============
+async def show_my_chats(message, user_id: int):
+    """Личка: если чат один — сразу сводка, если несколько — выбор."""
+    chats = user_chats(user_id)
+    if not chats:
+        await message.answer(
+            "Я пока не знаю твоих чатов 🤔\n"
+            "Добавь меня в чат класса, сделай администратором и нажми там «🔄 Обновить участников».",
+            attachments=[back_menu()],
+        )
+    elif len(chats) == 1:
+        await send_summary(message, chats[0][0], in_group=False, title=chats[0][1])
+    else:
+        await message.answer("Какой класс показать?", attachments=[chat_picker(chats)])
+
+
+async def show_all_chats(message, user_id: int):
+    """Личка: сводки всех чатов подряд, каждая со своим заголовком."""
+    chats = user_chats(user_id)
+    if not chats:
+        await show_my_chats(message, user_id)
+        return
+    for chat_id, label in chats[:8]:
+        await send_summary(message, chat_id, in_group=False, title=label)
+
+
+WELCOME = (
+    "Привет! Я Сферум.Сводка 💙\n"
+    "Читаю чаты класса и собираю главное: что проходили, домашку и дедлайны.\n\n"
+    "Выбери, что показать 👇"
+)
+
+HELP = (
+    "Как подключить класс:\n"
+    "1. Добавь меня в чат класса.\n"
+    "2. Сделай меня администратором — иначе я не вижу сообщения.\n"
+    "3. Нажми в чате «🔄 Обновить участников».\n\n"
+    "Потом любой ученик класса может открыть меня здесь и нажать «📋 Моя сводка».\n"
+    "У каждой строки домашки есть кнопка 🔎 — она покажет исходное сообщение."
+)
+
+
+# ============ 5. События и кнопки ============
 
 @router.bot_started()
 async def bot_started(event: BotStarted):
-    await event.bot.send_message(
-        chat_id=event.chat_id,
-        text="Привет! Я бот для MAX 💙\nНапиши /summary, чтобы получить сводку класса.",
-    )
+    await event.bot.send_message(chat_id=event.chat_id, text=WELCOME, attachments=[main_menu()])
 
 
 @router.bot_added()
@@ -111,65 +151,55 @@ async def bot_added(event: BotAdded):
     chat_id = event.chat_id
     try:
         count = await sync_members(event.bot, chat_id)
-        text = f"Привет! Я Сферум.Сводка 💙\nНашёл участников: {count}. Напишите /summary, чтобы получить сводку."
+        text = f"Привет! Я Сферум.Сводка 💙\nНашёл участников: {count}."
     except Exception:
         logging.exception("Не удалось получить участников")
         text = (
             "Привет! Я Сферум.Сводка 💙\n"
-            "Чтобы я видел чат и всех участников, сделайте меня администратором, "
-            "а потом отправьте команду /scan."
+            "Сделайте меня администратором, а потом нажмите «🔄 Обновить участников»."
         )
-    await event.bot.send_message(chat_id=chat_id, text=text)
-
-
-@router.message_created(Command("scan"))
-async def scan(event: MessageCreated):
-    """Ручное обновление списка участников. Можно запускать сколько угодно раз."""
-    message = event.message
-    if not is_group(message):
-        await message.answer("Команда /scan работает в чате класса.")
-        return
-    chat_id = message.recipient.chat_id
-    try:
-        count = await sync_members(event.bot, chat_id)
-        await message.answer(f"Готово! Участников в классе: {count}.")
-    except Exception:
-        logging.exception("Не удалось получить участников")
-        await message.answer("Не получилось. Сделайте меня администратором чата и повторите /scan.")
+    await event.bot.send_message(chat_id=chat_id, text=text, attachments=[group_menu(chat_id)])
 
 
 @router.message_created(CommandStart())
-async def hello(event: MessageCreated):
-    await event.message.answer(
-        "Привет! Я Сферум.Сводка 💙\n"
-        "Как подключить класс: добавь меня в чат класса и сделай администратором.\n\n"
-        "/summary — актуальные задания и темы уроков\n"
-        "/class 7Б — назвать этот чат (в чате класса)\n"
-        "/gpt вопрос — спросить ИИ\n\n"
-        "В личке я показываю сводки только тех чатов, где ты писал(а)."
-    )
+async def start(event: MessageCreated):
+    if is_group(event.message):
+        await event.message.answer("Выбери действие 👇", attachments=[group_menu(event.message.recipient.chat_id)])
+    else:
+        await event.message.answer(WELCOME, attachments=[main_menu()])
 
 
-@router.message_created(Command("gpt"))
-async def gpt(event: MessageCreated):
-    text = event.message.body.text or ""
-    prompt = text.replace("/gpt", "", 1).strip()
+@router.message_created(Command("menu"))
+async def menu_command(event: MessageCreated):
+    await start(event)
 
-    if not prompt:
-        await event.message.answer(
-            "Напиши вопрос после команды /gpt.\nНапример: /gpt Почему небо голубое?"
-        )
+
+@router.message_created(Command("summary"))
+async def summary_command(event: MessageCreated):
+    """Команда осталась как запасной вариант, основной путь — кнопки."""
+    message = event.message
+    user_id, name = sender_info(message)
+    if is_group(message):
+        chat_id = message.recipient.chat_id
+        touch_member(chat_id, user_id, name)
+        await ensure_synced(event.bot, chat_id)
+        await send_summary(message, chat_id, in_group=True)
+    else:
+        await show_my_chats(message, user_id)
+
+
+@router.message_created(Command("scan"))
+async def scan_command(event: MessageCreated):
+    message = event.message
+    if not is_group(message):
+        await message.answer("Это работает в чате класса.")
         return
-
-    try:
-        await event.message.answer(await ask_gpt(prompt))
-    except Exception:
-        logging.exception("Ошибка при запросе к модели")
-        await event.message.answer("Не удалось получить ответ от ИИ. Попробуй позже.")
+    await do_scan(event.bot, message, message.recipient.chat_id)
 
 
 @router.message_created(Command("class"))
 async def set_class(event: MessageCreated):
+    """Название чата: /class 7Б (чтобы в личке было «7Б», а не «Чат 123»)."""
     message = event.message
     if not is_group(message):
         await message.answer("Название задаётся в чате класса: /class 7Б")
@@ -184,60 +214,72 @@ async def set_class(event: MessageCreated):
     await message.answer(f"Готово, этот чат называется «{title[:60]}».")
 
 
-@router.message_created(Command("summary"))
-async def summary(event: MessageCreated):
-    message = event.message
-    user_id, name = sender_info(message)
+async def do_scan(bot, message, chat_id: int):
+    """Подтягивает участников и сообщает результат."""
+    try:
+        count = await sync_members(bot, chat_id)
+        await message.answer(f"Готово! Участников в классе: {count} ✅", attachments=[group_menu(chat_id)])
+    except Exception:
+        logging.exception("Не удалось получить участников")
+        await message.answer("Не получилось 😕 Сделайте меня администратором чата и нажмите кнопку ещё раз.")
 
-    # В чате класса: сводка именно этого чата.
-    if is_group(message):
-        chat_id = message.recipient.chat_id
-        touch_member(chat_id, user_id, name)
-        await ensure_synced(event.bot, chat_id)
-        await send_summary(message, chat_id)
-        return
 
-    # В личке: только чаты, где пользователь был замечен.
-    chats = user_chats(user_id)
-    if not chats:
-        await message.answer(
-            "Я пока не знаю твоих чатов.\n"
-            "Пусть в чате класса, где я администратор, кто-нибудь отправит /scan, и повтори /summary."
-        )
-    elif len(chats) == 1:
-        await send_summary(message, chats[0][0])
-    else:
-        builder = InlineKeyboardBuilder()
-        for chat_id, label in chats[:8]:
-            builder.row(CallbackButton(text=label, payload=f"sum:{chat_id}"))
-        await message.answer("Какой класс показать?", attachments=[builder.as_markup()])
+def callback_user(event):
+    """(id, имя) того, кто нажал кнопку."""
+    user = event.callback.user
+    name = " ".join(x for x in (getattr(user, "first_name", ""), getattr(user, "last_name", "")) if x)
+    return getattr(user, "user_id", None), name
+
+
+@router.message_callback(F.callback.payload.startswith("menu:"))
+async def menu_buttons(event: MessageCallback):
+    action = event.callback.payload.split(":")[1]
+    user_id, _name = callback_user(event)
+    await event.answer(notification="Секунду…")
+    if action == "summary":
+        await show_my_chats(event.message, user_id)
+    elif action == "all":
+        await show_all_chats(event.message, user_id)
+    elif action == "help":
+        await event.message.answer(HELP, attachments=[back_menu()])
+    else:  # home
+        await event.message.answer(WELCOME, attachments=[main_menu()])
 
 
 @router.message_callback(F.callback.payload.startswith("sum:"))
-async def choose_chat(event: MessageCallback):
+async def summary_button(event: MessageCallback):
     chat_id = int(event.callback.payload.split(":")[1])
-    user_id = getattr(event.callback.user, "user_id", None)
-
-    # Проверка доступа: нельзя смотреть сводку чужого класса.
-    if not is_member(chat_id, user_id):
+    user_id, name = callback_user(event)
+    in_group = is_group(event.message)
+    if in_group:  # нажал в самом чате — значит он там точно есть
+        touch_member(chat_id, user_id, name)
+    if not is_member(chat_id, user_id):  # чужие классы не показываем
         await event.answer(notification="Нет доступа к этому чату")
         return
     await event.answer(notification="Показываю сводку")
-    await send_summary(event.message, chat_id)
+    if in_group:
+        await ensure_synced(event.bot, chat_id)
+    await send_summary(event.message, chat_id, in_group=in_group)
+
+
+@router.message_callback(F.callback.payload.startswith("scan:"))
+async def scan_button(event: MessageCallback):
+    chat_id = int(event.callback.payload.split(":")[1])
+    await event.answer(notification="Обновляю список…")
+    await do_scan(event.bot, event.message, chat_id)
 
 
 @router.message_callback(F.callback.payload.startswith("src:"))
 async def show_source(event: MessageCallback):
     """Кнопка 🔎: показывает исходное сообщение, из которого взята запись."""
     task_id = int(event.callback.payload.split(":")[1])
-    user_id = getattr(event.callback.user, "user_id", None)
-
+    user_id, _name = callback_user(event)
     task = get_task(task_id)
     if task is None:
         await event.answer(notification="Запись уже устарела и удалена")
         return
     chat_id, mid = task[0], task[1]
-    if not is_member(chat_id, user_id):  # чужие классы не показываем
+    if not is_member(chat_id, user_id):
         await event.answer(notification="Нет доступа к этому чату")
         return
     await event.answer(notification="Ищу источник")
