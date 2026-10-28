@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: svodka
+    restart: unless-stopped  
+    env_file: .env               
+    volumes:
+      - svodka-data:/data      
+
+volumes:
+  svodka-data:

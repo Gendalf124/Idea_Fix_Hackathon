@@ -228,7 +228,7 @@ async def do_scan(bot, message, chat_id: int):
         await message.answer("Не получилось 😕 Сделайте меня администратором чата и нажмите кнопку ещё раз.")
 
 
-pending_title = {}  # (chat_id, user_id) -> когда нажали ✏️. Ждём от этого человека название.
+pending_title = {} 
 TITLE_WAIT_S = 300  # ждём 5 минут
 
 
@@ -306,12 +306,11 @@ async def show_source(event: MessageCallback):
 
 
 # ============ 6. Каждое новое сообщение чата ============
-# ВАЖНО: этот обработчик должен стоять ПОСЛЕДНИМ — он ловит всё, что не команда.
 
 @router.message_created()
 async def collect(event: MessageCreated):
     message = event.message
-    if not is_group(message):  # личные сообщения боту не сохраняем
+    if not is_group(message):  
         return
     text = (message.body.text or "").strip()
     if not text or text.startswith("/"):
@@ -322,7 +321,7 @@ async def collect(event: MessageCreated):
     user_id, name = sender_info(message)
     chat_id = message.recipient.chat_id
 
-    # Человек нажал ✏️ и теперь пишет название чата.
+    
     asked_at = pending_title.pop((chat_id, user_id), None)
     if asked_at and time.time() - asked_at < TITLE_WAIT_S:
         set_title(chat_id, text)
