@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.db import _connect
 
-TZ = timezone(timedelta(hours=5))
-KEEP_DAYS = 7  
+TZ = timezone(timedelta(hours=5))  # Учалы, UTC+5
+KEEP_DAYS = 7  # записи без срока и «что проходили» живут 7 дней
 
 
 def init_tasks():
@@ -58,3 +58,12 @@ def get_tasks(chat_id: int):
             "WHERE chat_id = ? ORDER BY due IS NULL, due, created_ts",
             (chat_id,),
         ).fetchall()
+
+
+def get_task(task_id: int):
+    """Одна запись целиком: (chat_id, mid, kind, subject, text, due, created_ts) или None."""
+    with _connect() as db:
+        return db.execute(
+            "SELECT chat_id, mid, kind, subject, text, due, created_ts FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()

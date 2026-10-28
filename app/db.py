@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import time
 
 DB_PATH = os.getenv("DB_PATH", "svodka.db")
 
@@ -28,6 +29,10 @@ def init_db():
         # Чаты (классы) и их названия.
         db.execute(
             "CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, title TEXT)"
+        )
+        # Когда мы в последний раз подтягивали список участников чата.
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS chat_sync (chat_id INTEGER PRIMARY KEY, synced_ts INTEGER NOT NULL)"
         )
         # Кто в каком чате замечен. По этой таблице бот решает, чью сводку кому показывать.
         db.execute(
@@ -107,3 +112,31 @@ def user_chats(user_id):
             (user_id,),
         ).fetchall()
     return [(chat_id, chat_label(chat_id, title)) for chat_id, title in rows]
+
+
+# ---------- оригиналы сообщений и синхронизация ----------
+
+def get_message(chat_id: int, mid: str):
+    """Оригинал сообщения: (имя автора, время в мс, текст) или None, если его уже нет."""
+    with _connect() as db:
+        return db.execute(
+            "SELECT user_name, ts, text FROM messages WHERE chat_id = ? AND mid = ?",
+            (chat_id, mid),
+        ).fetchone()
+
+
+def mark_synced(chat_id: int, now_ms: int = None):
+    now_ms = now_ms or int(time.time() * 1000)
+    with _connect() as db:
+        db.execute(
+            "INSERT INTO chat_sync (chat_id, synced_ts) VALUES (?, ?) "
+            "ON CONFLICT(chat_id) DO UPDATE SET synced_ts = excluded.synced_ts",
+            (chat_id, now_ms),
+        )
+
+
+def last_synced(chat_id: int):
+    """Время последней успешной синхронизации участников (мс) или None."""
+    with _connect() as db:
+        row = db.execute("SELECT synced_ts FROM chat_sync WHERE chat_id = ?", (chat_id,)).fetchone()
+    return row[0] if row else None
