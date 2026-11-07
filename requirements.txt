@@ -1,0 +1,5 @@
+maxapi==1.2.3
+openai==1.75.0
+httpx==0.28.1
+python-dotenv==1.2.1
+Pillow==10.4.0

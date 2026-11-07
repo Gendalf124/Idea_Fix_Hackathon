@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: svodka
+    restart: unless-stopped      # сам поднимется после сбоя и перезагрузки сервера
+    env_file: .env               # токен и ключ берутся из .env, в образ не попадают
+    volumes:
+      - svodka-data:/data        # база переживает перезапуск
+
+volumes:
+  svodka-data:
