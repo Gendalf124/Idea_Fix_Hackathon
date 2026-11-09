@@ -10,7 +10,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(message)s")  # видно, какой способ передачи аудио подошёл
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-from app import config, voice  # noqa: E402
+from app import config, voice
 
 
 async def main():
