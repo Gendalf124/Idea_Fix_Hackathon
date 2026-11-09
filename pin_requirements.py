@@ -1,8 +1,3 @@
-"""Записывает в requirements.txt ТОЧНЫЕ версии библиотек, которые сейчас установлены у вас.
-
-Запускать один раз, когда бот у вас работает:   python pin_requirements.py
-Так в Docker поставятся ровно те версии, на которых вы всё проверили.
-"""
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
